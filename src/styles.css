@@ -234,7 +234,7 @@ h2 {
 .stats {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   margin-bottom: 18px;
 }
 
@@ -884,6 +884,25 @@ td {
   justify-content: flex-end;
 }
 
+.user-history-panel {
+  margin-top: 24px;
+}
+
+.history-columns {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.history-columns h3 {
+  color: var(--maroon-deep);
+  margin: 0 0 10px;
+}
+
+.compact-submission {
+  align-items: flex-start;
+}
+
 @media (max-width: 1040px) {
   .brand-hero {
     grid-template-columns: 1fr auto;
@@ -951,7 +970,7 @@ td {
   }
 
   .stats {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .stats div {
@@ -1045,6 +1064,7 @@ td {
 
   .user-form-grid,
   .mini-row,
+  .history-columns,
   .submission-card {
     grid-template-columns: 1fr;
   }

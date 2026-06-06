@@ -56,4 +56,6 @@ Admin can add and delete user accounts. Users log in with the username/password 
 
 User entries are auto-saved to Firebase Realtime Database under `drafts/{username}` whenever rows are added, edited, deleted, imported, or settings refresh the rows. After upload, entries stay saved until the user presses **Clear Entry** in the upload success popup.
 
+Users can view their own pending and exported upload history. Admin can mark uploads as exported and delete uploaded records after they are exported.
+
 Note: this is a client-side username/password implementation for local operations. For production security, protect Firebase Realtime Database with proper Firebase Auth, Database Rules, or Cloud Functions.

@@ -110,6 +110,7 @@ let scannerStream = null;
 let scannerFrame = null;
 let adminUsers = [];
 let adminSubmissions = [];
+let userSubmissions = [];
 let appMessage = '';
 let uploadPopup = null;
 
@@ -246,7 +247,7 @@ function filteredRows() {
   );
 }
 
-function render() {
+async function render() {
   stopScanner();
   if (!firebaseDb) {
     renderFirebaseSetup();
@@ -265,8 +266,14 @@ function render() {
     return;
   }
 
+  if (currentUser?.role === 'user') {
+    await loadUserSubmissions();
+  }
+
   const current = draftRecord || emptyRecord();
   const records = filteredRows();
+  const pendingUploads = userSubmissions.filter((item) => item.status !== 'exported');
+  const exportedUploads = userSubmissions.filter((item) => item.status === 'exported');
   const totals = rows.reduce(
     (acc, row) => {
       acc.pieces += Number(row.NoOfPcs) || 0;
@@ -322,6 +329,8 @@ function render() {
           <div><span>Total Entries</span><strong>${rows.length}</strong></div>
           <div><span>Total Pieces</span><strong>${totals.pieces}</strong></div>
           <div><span>Total Amount</span><strong>${formatNumber(totals.amount)}</strong></div>
+          <div><span>Pending</span><strong>${pendingUploads.length}</strong></div>
+          <div><span>Exported</span><strong>${exportedUploads.length}</strong></div>
         </section>
 
         <div class="entry-layout">
@@ -369,6 +378,25 @@ function render() {
             </div>
           </section>
         </div>
+        <section class="settings-panel user-history-panel">
+          <div class="panel-heading">
+            <div><p class="form-kicker">Your uploads</p><h2>Pending and Exported</h2></div>
+          </div>
+          <div class="history-columns">
+            <div>
+              <h3>Pending</h3>
+              <div class="submission-list">
+                ${pendingUploads.map(userSubmissionTemplate).join('') || '<p class="empty">No pending uploads.</p>'}
+              </div>
+            </div>
+            <div>
+              <h3>Exported</h3>
+              <div class="submission-list">
+                ${exportedUploads.map(userSubmissionTemplate).join('') || '<p class="empty">No exported uploads yet.</p>'}
+              </div>
+            </div>
+          </div>
+        </section>
       </section>
     </main>
   `;
@@ -562,7 +590,7 @@ async function renderAdmin() {
     </main>
   `;
   createIcons({
-    icons: { ArrowLeft, Bell, Download, KeyRound, LogOut, Plus, Settings, Trash2, User, Users },
+    icons: { ArrowLeft, Bell, Download, KeyRound, LogOut, Plus, Settings, ShieldCheck, Trash2, User, Users },
   });
   bindAdminEvents();
 }
@@ -793,6 +821,7 @@ function userTemplate(user) {
 
 function submissionTemplate(item) {
   const date = item.createdAt ? new Date(item.createdAt).toLocaleString() : 'Uploaded';
+  const canDelete = item.status === 'exported';
   return `
     <div class="submission-card">
       <div>
@@ -809,6 +838,27 @@ function submissionTemplate(item) {
           <i data-lucide="shield-check"></i>
           <span>Mark Exported</span>
         </button>
+        ${
+          canDelete
+            ? `<button class="danger" type="button" data-delete-submission="${escapeHtml(item.id)}">
+                <i data-lucide="trash-2"></i>
+                <span>Delete</span>
+              </button>`
+            : ''
+        }
+      </div>
+    </div>
+  `;
+}
+
+function userSubmissionTemplate(item) {
+  const date = item.createdAt ? new Date(item.createdAt).toLocaleString() : 'Uploaded';
+  return `
+    <div class="submission-card compact-submission">
+      <div>
+        <p class="form-kicker">${escapeHtml(item.status || 'pending')}</p>
+        <h3>${item.count || item.rows?.length || 0} rows</h3>
+        <span>${escapeHtml(date)}</span>
       </div>
     </div>
   `;
@@ -1146,6 +1196,24 @@ async function loadAdminData() {
   }
 }
 
+async function loadUserSubmissions() {
+  if (!currentUser?.username || !firebaseDb) {
+    userSubmissions = [];
+    return;
+  }
+  try {
+    const submissionsSnap = await get(ref(firebaseDb, 'submissions'));
+    userSubmissions = submissionsSnap.exists()
+      ? Object.entries(submissionsSnap.val())
+          .map(([id, value]) => ({ id, ...value }))
+          .filter((item) => item.user === currentUser.username)
+          .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      : [];
+  } catch {
+    userSubmissions = [];
+  }
+}
+
 async function addUserAccount(event) {
   event.preventDefault();
   const username = document.querySelector('#newUsername').value.trim();
@@ -1187,6 +1255,23 @@ async function markSubmissionExported(id) {
     renderAdmin();
   } catch {
     appMessage = 'Could not update submission.';
+    renderAdmin();
+  }
+}
+
+async function deleteExportedSubmission(id) {
+  const submission = adminSubmissions.find((item) => item.id === id);
+  if (!submission || submission.status !== 'exported') {
+    appMessage = 'Only exported uploads can be deleted.';
+    renderAdmin();
+    return;
+  }
+  try {
+    await remove(ref(firebaseDb, `submissions/${id}`));
+    appMessage = 'Exported upload deleted.';
+    renderAdmin();
+  } catch {
+    appMessage = 'Could not delete upload.';
     renderAdmin();
   }
 }
@@ -1259,6 +1344,10 @@ function bindAdminEvents() {
 
   document.querySelectorAll('[data-mark-exported]').forEach((button) => {
     button.addEventListener('click', () => markSubmissionExported(button.dataset.markExported));
+  });
+
+  document.querySelectorAll('[data-delete-submission]').forEach((button) => {
+    button.addEventListener('click', () => deleteExportedSubmission(button.dataset.deleteSubmission));
   });
 }
 
