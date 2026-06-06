@@ -302,6 +302,10 @@ async function render() {
         ${messageTemplate()}
         ${uploadPopupTemplate()}
         <div class="top-actions">
+          <button id="user-settings-btn" class="secondary compact-action" type="button" title="Default description settings">
+            <i data-lucide="settings"></i>
+            <span>Settings</span>
+          </button>
           <label class="file-button" title="Import an existing Excel file">
             <i data-lucide="file-up"></i>
             <span>Import</span>
@@ -939,6 +943,11 @@ function bindEvents() {
   });
 
   document.querySelector('#admin-settings-btn')?.addEventListener('click', () => {
+    currentView = 'settings';
+    render();
+  });
+
+  document.querySelector('#user-settings-btn')?.addEventListener('click', () => {
     currentView = 'settings';
     render();
   });
