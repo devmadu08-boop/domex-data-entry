@@ -697,8 +697,8 @@ h2 {
 .field-Amount .input-shell {
   grid-template-columns: 1fr;
   justify-items: center;
-  min-height: 166px;
-  padding: 20px;
+  min-height: 126px;
+  padding: 14px;
 }
 
 .field-Kilo .input-shell > svg,
@@ -711,9 +711,9 @@ h2 {
 .field-Gram input,
 .field-Amount input {
   color: #55525e;
-  font-size: 34px;
+  font-size: 26px;
   font-weight: 900;
-  height: 42px;
+  height: 34px;
   text-align: center;
 }
 
@@ -1100,14 +1100,14 @@ td {
   .field-Kilo .input-shell,
   .field-Gram .input-shell,
   .field-Amount .input-shell {
-    min-height: 138px;
-    padding: 14px 8px;
+    min-height: 112px;
+    padding: 12px 8px;
   }
 
   .field-Kilo input,
   .field-Gram input,
   .field-Amount input {
-    font-size: 30px;
+    font-size: 24px;
   }
 
   .quick-city-panel {

@@ -1145,8 +1145,9 @@ async function startScanner() {
         if (value) {
           input.value = value.trim();
           draftRecord = normalizeRow({ ...draftRecord, TrackingNumber: input.value });
-          setScannerStatus('Barcode scanned. Tap Next.');
           stopScanner(false);
+          formStep = 'details';
+          render();
           return;
         }
       } catch {
