@@ -25,6 +25,7 @@ import {
   ListRestart,
   LogOut,
   MapPin,
+  Minus,
   Package,
   Phone,
   Plus,
@@ -39,7 +40,7 @@ import {
   Weight,
 } from 'lucide';
 import branches from '../domex_branches.json';
-import logoUrl from '../domex logo.png';
+import logoUrl from './domex-logo-clean.png';
 
 const STORAGE_KEY = 'domex-pickups-v1';
 const SETTINGS_KEY = 'domex-settings-v1';
@@ -420,6 +421,7 @@ async function render() {
       ListRestart,
       LogOut,
       MapPin,
+      Minus,
       Package,
       Phone,
       Plus,
@@ -645,6 +647,7 @@ function renderSettings() {
 
 function fieldTemplate(header, value) {
   if (header === 'ReceiverCity') return cityFieldTemplate(value);
+  if (header === 'NoOfPcs') return piecesFieldTemplate(value);
 
   const meta = FIELD_META[header];
   const common = `
@@ -656,7 +659,7 @@ function fieldTemplate(header, value) {
   `;
 
   return `
-    <label class="field ${meta.span}">
+    <label class="field field-${header} ${meta.span}">
       <span>${meta.label}</span>
       ${
         meta.type === 'textarea'
@@ -673,10 +676,29 @@ function fieldTemplate(header, value) {
   `;
 }
 
+function piecesFieldTemplate(value) {
+  const safeValue = value || 1;
+  return `
+    <label class="field field-NoOfPcs tiny">
+      <span>Pieces</span>
+      <div class="input-shell stepper-shell">
+        <i data-lucide="box"></i>
+        <button class="stepper-btn" type="button" data-step-pieces="-1" aria-label="Decrease pieces">
+          <i data-lucide="minus"></i>
+        </button>
+        <input id="NoOfPcs" name="NoOfPcs" type="number" min="1" required value="${escapeHtml(safeValue)}" />
+        <button class="stepper-btn" type="button" data-step-pieces="1" aria-label="Increase pieces">
+          <i data-lucide="plus"></i>
+        </button>
+      </div>
+    </label>
+  `;
+}
+
 function cityFieldTemplate(value) {
   const selectedCity = normalizedCityMap.get(normalizeSearch(value)) || '';
   return `
-    <label class="field city-field medium">
+    <label class="field field-ReceiverCity city-field medium">
       <span>Receiver City</span>
       <div class="input-shell">
         <i data-lucide="search"></i>
@@ -690,7 +712,11 @@ function cityFieldTemplate(value) {
         />
       </div>
       <input id="ReceiverCity" name="ReceiverCity" type="hidden" required value="${escapeHtml(selectedCity)}" />
-      <div id="city-options-panel" class="city-options" role="listbox" hidden>
+      <div id="city-options-panel" class="city-options quick-city-panel" role="listbox" hidden>
+        <div class="quick-city-title">
+          <i data-lucide="building-2"></i>
+          <strong>Quick Select City</strong>
+        </div>
         ${cityOptionsTemplate(selectedCity)}
       </div>
       <small id="city-error" class="field-error">Select a city from the list.</small>
@@ -920,6 +946,7 @@ function bindEvents() {
 
   document.querySelector('#scan-btn')?.addEventListener('click', startScanner);
   bindCityPicker();
+  bindPieceStepper();
 
   document.querySelector('#settings-btn').addEventListener('click', () => {
     stopScanner();
@@ -999,6 +1026,18 @@ function bindEvents() {
       if (editingId === button.dataset.delete) editingId = null;
       saveRows();
       render();
+    });
+  });
+}
+
+function bindPieceStepper() {
+  const input = document.querySelector('#NoOfPcs');
+  if (!input) return;
+  document.querySelectorAll('[data-step-pieces]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const step = Number(button.dataset.stepPieces);
+      const current = Number(input.value) || 1;
+      input.value = Math.max(1, current + step);
     });
   });
 }
