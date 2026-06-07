@@ -666,6 +666,20 @@ h2 {
   min-height: 52px;
 }
 
+.city-options .custom-city-option {
+  aspect-ratio: auto;
+  background: linear-gradient(135deg, #c20d33, #7b0714);
+  color: var(--gold);
+  grid-column: 1 / -1;
+  min-height: 58px;
+}
+
+.city-options .custom-city-option svg {
+  color: var(--gold);
+  height: 22px;
+  width: 22px;
+}
+
 .city-options button:not(:disabled) {
   display: inline-flex;
 }

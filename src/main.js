@@ -752,7 +752,20 @@ function cityFieldTemplate(value) {
 
 function cityOptionsTemplate(searchTerm) {
   const options = cityMatches(searchTerm).slice(0, 24);
-  if (!options.length) return '<button type="button" disabled>No matching city</button>';
+  const customCity = String(searchTerm || '').trim();
+  if (!options.length) {
+    return `
+      <button type="button" disabled>No matching city</button>
+      ${
+        customCity
+          ? `<button type="button" data-custom-city="${escapeHtml(customCity)}" class="custom-city-option">
+              <i data-lucide="plus"></i>
+              Add custom: ${escapeHtml(customCity)}
+            </button>`
+          : ''
+      }
+    `;
+  }
   return options
     .map(
       (city) => `
@@ -1111,6 +1124,17 @@ function bindCityOptionButtons() {
       document.querySelector('#ReceiverContactNo')?.focus();
     });
   });
+
+  document.querySelectorAll('[data-custom-city]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const city = button.dataset.customCity.trim();
+      searchInput.value = city;
+      hiddenInput.value = city;
+      searchInput.classList.remove('invalid');
+      document.querySelector('#city-options-panel').hidden = true;
+      document.querySelector('#ReceiverContactNo')?.focus();
+    });
+  });
 }
 
 function firstInvalidDetailField(data) {
@@ -1118,7 +1142,6 @@ function firstInvalidDetailField(data) {
     const value = String(data[header] ?? '').trim();
     if (!value) return header;
   }
-  if (!normalizedCityMap.has(normalizeSearch(data.ReceiverCity))) return 'ReceiverCity';
   return '';
 }
 
