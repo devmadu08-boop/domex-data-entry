@@ -117,6 +117,39 @@ let uploadPopup = null;
 
 initFirebase();
 
+const iconRegistry = {
+  'arrow-left': ArrowLeft,
+  banknote: Banknote,
+  bell: Bell,
+  box: Box,
+  'building-2': Building2,
+  camera: Camera,
+  'chevron-right': ChevronRight,
+  download: Download,
+  'file-up': FileUp,
+  'key-round': KeyRound,
+  'list-restart': ListRestart,
+  'log-out': LogOut,
+  'map-pin': MapPin,
+  minus: Minus,
+  package: Package,
+  phone: Phone,
+  plus: Plus,
+  save: Save,
+  search: Search,
+  settings: Settings,
+  'shield-check': ShieldCheck,
+  'trash-2': Trash2,
+  upload: Upload,
+  user: User,
+  users: Users,
+  weight: Weight,
+};
+
+function renderIcons() {
+  createIcons({ icons: iconRegistry });
+}
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -406,36 +439,7 @@ async function render() {
     </main>
   `;
 
-  createIcons({
-    icons: {
-      ArrowLeft,
-      Banknote,
-      Bell,
-      Box,
-      Building2,
-      Camera,
-      ChevronRight,
-      Download,
-      FileUp,
-      KeyRound,
-      ListRestart,
-      LogOut,
-      MapPin,
-      Minus,
-      Package,
-      Phone,
-      Plus,
-      Save,
-      Search,
-      Settings,
-      ShieldCheck,
-      Trash2,
-      Upload,
-      User,
-      Users,
-      Weight,
-    },
-  });
+  renderIcons();
   bindEvents();
 }
 
@@ -494,7 +498,7 @@ function renderFirebaseSetup() {
       </form>
     </main>
   `;
-  createIcons({ icons: { Save, Settings } });
+  renderIcons();
   document.querySelector('#firebase-form').addEventListener('submit', (event) => {
     event.preventDefault();
     try {
@@ -541,7 +545,7 @@ function renderLogin() {
       </section>
     </main>
   `;
-  createIcons({ icons: { ChevronRight, KeyRound, User } });
+  renderIcons();
   document.querySelector('#login-form').addEventListener('submit', handleLogin);
 }
 
@@ -595,9 +599,7 @@ async function renderAdmin() {
       </section>
     </main>
   `;
-  createIcons({
-    icons: { ArrowLeft, Bell, Download, KeyRound, LogOut, Plus, Settings, ShieldCheck, Trash2, User, Users },
-  });
+  renderIcons();
   bindAdminEvents();
 }
 
@@ -639,9 +641,7 @@ function renderSettings() {
     </main>
   `;
 
-  createIcons({
-    icons: { ArrowLeft, Save },
-  });
+  renderIcons();
   bindSettingsEvents();
 }
 
@@ -1050,7 +1050,7 @@ function bindCityPicker() {
 
   const refreshOptions = () => {
     optionsPanel.innerHTML = cityOptionsTemplate(searchInput.value);
-    createIcons({ icons: { Building2 } });
+    renderIcons();
     bindCityOptionButtons();
   };
 
