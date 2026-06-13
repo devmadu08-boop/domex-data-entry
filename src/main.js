@@ -1183,20 +1183,51 @@ async function startScanner() {
     });
     video.srcObject = scannerStream;
     await video.play();
-    setScannerStatus('Point the camera at the barcode.');
+    setScannerStatus('Keep one barcode inside the box until it is captured.');
     const detector = new BarcodeDetector();
+    const scanCanvas = document.createElement('canvas');
+    const scanContext = scanCanvas.getContext('2d', { willReadFrequently: true });
+    let lastValue = '';
+    let stableDetections = 0;
 
     const scan = async () => {
       if (!scannerStream || formStep !== 'tracking') return;
       try {
-        const codes = await detector.detect(video);
-        const value = codes?.[0]?.rawValue;
-        if (value) {
-          input.value = value.trim();
+        const crop = getScannerCrop(video);
+        if (!crop || !scanContext) {
+          scannerFrame = requestAnimationFrame(scan);
+          return;
+        }
+
+        scanCanvas.width = crop.outputWidth;
+        scanCanvas.height = crop.outputHeight;
+        scanContext.drawImage(
+          video,
+          crop.sourceX,
+          crop.sourceY,
+          crop.sourceWidth,
+          crop.sourceHeight,
+          0,
+          0,
+          crop.outputWidth,
+          crop.outputHeight
+        );
+
+        const codes = await detector.detect(scanCanvas);
+        const value = selectCenteredBarcode(codes, scanCanvas)?.rawValue?.trim();
+        if (value && value === lastValue) {
+          stableDetections += 1;
+        } else {
+          lastValue = value || '';
+          stableDetections = value ? 1 : 0;
+        }
+
+        if (value && stableDetections >= 2) {
+          input.value = value;
           draftRecord = normalizeRow({ ...draftRecord, TrackingNumber: input.value });
           stopScanner(false);
-          formStep = 'details';
-          render();
+          setScannerStatus('Barcode captured. Press Next to continue.');
+          input.focus();
           return;
         }
       } catch {
@@ -1210,6 +1241,54 @@ async function startScanner() {
     setScannerStatus('Camera permission denied. Type the tracking number manually.');
     input.focus();
   }
+}
+
+function getScannerCrop(video) {
+  const frame = document.querySelector('.scan-frame');
+  const view = document.querySelector('.scanner-view');
+  if (!frame || !view || !video.videoWidth || !video.videoHeight) return null;
+
+  const frameRect = frame.getBoundingClientRect();
+  const viewRect = view.getBoundingClientRect();
+  const scale = Math.max(viewRect.width / video.videoWidth, viewRect.height / video.videoHeight);
+  const renderedWidth = video.videoWidth * scale;
+  const renderedHeight = video.videoHeight * scale;
+  const videoOffsetX = (viewRect.width - renderedWidth) / 2;
+  const videoOffsetY = (viewRect.height - renderedHeight) / 2;
+  const sourceX = Math.max(0, (frameRect.left - viewRect.left - videoOffsetX) / scale);
+  const sourceY = Math.max(0, (frameRect.top - viewRect.top - videoOffsetY) / scale);
+  const sourceWidth = Math.min(video.videoWidth - sourceX, frameRect.width / scale);
+  const sourceHeight = Math.min(video.videoHeight - sourceY, frameRect.height / scale);
+  if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+  const outputScale = Math.min(1, 960 / sourceWidth);
+
+  return {
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    outputWidth: Math.max(1, Math.round(sourceWidth * outputScale)),
+    outputHeight: Math.max(1, Math.round(sourceHeight * outputScale)),
+  };
+}
+
+function selectCenteredBarcode(codes, canvas) {
+  if (!codes?.length) return null;
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2;
+  return [...codes].sort((left, right) => {
+    const leftBox = left.boundingBox;
+    const rightBox = right.boundingBox;
+    const leftDistance = Math.hypot(
+      (leftBox?.x || 0) + (leftBox?.width || 0) / 2 - centerX,
+      (leftBox?.y || 0) + (leftBox?.height || 0) / 2 - centerY
+    );
+    const rightDistance = Math.hypot(
+      (rightBox?.x || 0) + (rightBox?.width || 0) / 2 - centerX,
+      (rightBox?.y || 0) + (rightBox?.height || 0) / 2 - centerY
+    );
+    return leftDistance - rightDistance;
+  })[0];
 }
 
 async function handleLogin(event) {

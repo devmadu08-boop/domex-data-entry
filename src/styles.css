@@ -356,9 +356,9 @@ h2 {
   border: 2px solid var(--gold);
   border-radius: 18px;
   box-shadow: 0 0 0 999px rgba(45, 2, 8, 0.34);
-  height: 44%;
+  height: 34%;
   position: relative;
-  width: 76%;
+  width: 68%;
   z-index: 1;
 }
 
