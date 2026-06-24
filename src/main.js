@@ -1024,9 +1024,8 @@ function bindEvents() {
   document.querySelector('#next-step')?.addEventListener('click', () => proceedToDetails(false));
   document.querySelector('#force-tracking-btn')?.addEventListener('click', () => proceedToDetails(true));
 
-  document.querySelector('#TrackingNumber')?.addEventListener('input', () => {
-    duplicateWarning = '';
-    document.querySelector('.duplicate-warning')?.remove();
+  document.querySelector('#TrackingNumber')?.addEventListener('input', (event) => {
+    checkTrackingDuringEntry(event.target.value);
   });
 
   document.querySelector('#back-step')?.addEventListener('click', () => {
@@ -1172,6 +1171,7 @@ async function proceedToDetails(forceUse = false) {
     return;
   }
   if (!(await ensureTrackingCanBeUsed(trackingNumber, { forceUse }))) {
+    render();
     input?.focus();
     return;
   }
@@ -1180,6 +1180,32 @@ async function proceedToDetails(forceUse = false) {
   formStep = 'details';
   render();
   document.querySelector('#ReceiverName')?.focus();
+}
+
+let trackingCheckToken = 0;
+
+async function checkTrackingDuringEntry(value) {
+  const trackingNumber = String(value || '').trim();
+  const token = ++trackingCheckToken;
+  duplicateWarning = '';
+  document.querySelector('.duplicate-warning')?.remove();
+  if (!trackingNumber) return;
+
+  const trackingKey = trackingNumberKey(trackingNumber);
+  if (forcedTrackingNumbers.has(trackingKey)) return;
+
+  const duplicate = await findDuplicateTracking(trackingNumber);
+  if (token !== trackingCheckToken) return;
+  if (!duplicate) return;
+
+  duplicateWarning =
+    duplicate.source === 'current'
+      ? `${trackingNumber} already exists in your current entry list.`
+      : `${trackingNumber} was already uploaded by ${duplicate.user || 'a user'}.`;
+  const input = document.querySelector('#TrackingNumber');
+  render();
+  document.querySelector('#TrackingNumber')?.focus();
+  if (input) document.querySelector('#TrackingNumber')?.setSelectionRange?.(trackingNumber.length, trackingNumber.length);
 }
 
 async function ensureTrackingCanBeUsed(trackingNumber, { forceUse = false, allowForced = false } = {}) {
@@ -1216,30 +1242,6 @@ async function findDuplicateTracking(trackingNumber) {
     if (editingSubmissionId && submission.id === editingSubmissionId) continue;
     const match = (submission.rows || []).find((row) => trackingNumberKey(row.TrackingNumber) === trackingKey);
     if (match) return { source: 'submission', user: submission.user, submission, row: match };
-  }
-  return null;
-}
-
-async function findRowsDuplicateForUpload(uploadRows) {
-  const seen = new Map();
-  for (const row of uploadRows) {
-    const key = trackingNumberKey(row.TrackingNumber);
-    if (!key || forcedTrackingNumbers.has(key)) continue;
-    if (seen.has(key)) return { trackingNumber: row.TrackingNumber, source: 'current' };
-    seen.set(key, row);
-  }
-
-  const submissions = await loadAllSubmissions();
-  for (const row of uploadRows) {
-    const key = trackingNumberKey(row.TrackingNumber);
-    if (!key || forcedTrackingNumbers.has(key)) continue;
-    const duplicate = submissions.find((submission) => {
-      if (editingSubmissionId && submission.id === editingSubmissionId) return false;
-      return (submission.rows || []).some((submissionRow) => trackingNumberKey(submissionRow.TrackingNumber) === key);
-    });
-    if (duplicate) {
-      return { trackingNumber: row.TrackingNumber, source: 'submission', user: duplicate.user };
-    }
   }
   return null;
 }
@@ -1420,7 +1422,10 @@ async function startScanner() {
           input.value = value;
           draftRecord = normalizeRow({ ...draftRecord, TrackingNumber: input.value });
           stopScanner(false);
-          setScannerStatus('Barcode captured. Press Next to continue.');
+          await checkTrackingDuringEntry(input.value);
+          setScannerStatus(
+            duplicateWarning ? 'Duplicate barcode captured. Review the warning below.' : 'Barcode captured. Press Next to continue.'
+          );
           input.focus();
           return;
         }
@@ -1528,16 +1533,6 @@ async function uploadRows() {
       const normalized = normalizeRow(row);
       return Object.fromEntries(HEADERS.map((header) => [header, normalized[header] ?? '']));
     });
-
-    const duplicate = await findRowsDuplicateForUpload(uploadRows);
-    if (duplicate) {
-      appMessage =
-        duplicate.source === 'current'
-          ? `Duplicate tracking number ${duplicate.trackingNumber} is already in this upload. Use Force Use from the tracking step if needed.`
-          : `Duplicate tracking number ${duplicate.trackingNumber} was already uploaded by ${duplicate.user || 'a user'}. Use Force Use from the tracking step if needed.`;
-      render();
-      return;
-    }
 
     if (editingSubmissionId) {
       const submission = userSubmissions.find((item) => item.id === editingSubmissionId);
