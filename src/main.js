@@ -114,9 +114,9 @@ let adminSubmissions = [];
 let userSubmissions = [];
 let appMessage = '';
 let uploadPopup = null;
-let editingSubmissionId = '';
 let duplicateWarning = '';
 let forcedTrackingNumbers = new Set();
+let activeSubmissionModal = null;
 
 initFirebase();
 
@@ -253,10 +253,10 @@ function saveSession(user) {
 
 function clearSession() {
   currentUser = null;
-  editingSubmissionId = '';
   editingId = null;
   duplicateWarning = '';
   forcedTrackingNumbers = new Set();
+  activeSubmissionModal = null;
   localStorage.removeItem(SESSION_KEY);
 }
 
@@ -279,7 +279,7 @@ function normalizeRow(row) {
 
 function saveRows() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
-  if (currentUser?.role === 'user' && firebaseDb && !editingSubmissionId) {
+  if (currentUser?.role === 'user' && firebaseDb) {
     set(ref(firebaseDb, `drafts/${accountKey(currentUser.username)}`), {
       rows: rows.map((row) => normalizeRow(row)),
       updatedAt: Date.now(),
@@ -368,6 +368,7 @@ async function render() {
       <section class="app-card">
         ${messageTemplate()}
         ${uploadPopupTemplate()}
+        ${submissionModalTemplate()}
         <div class="top-actions">
           <button id="user-settings-btn" class="secondary compact-action" type="button" title="Default description settings">
             <i data-lucide="settings"></i>
@@ -408,24 +409,13 @@ async function render() {
           <form id="entry-form" class="entry-form" autocomplete="off">
           <div class="form-title">
             <div>
-                <p class="form-kicker">${editingSubmissionId ? 'Editing upload' : editingId ? 'Update row' : 'Fast entry'}</p>
-                <h2>${editingSubmissionId ? 'Pending Upload' : formStep === 'tracking' ? 'Scan Tracking' : 'New Pickup'}</h2>
+                <p class="form-kicker">${editingId ? 'Update row' : 'Fast entry'}</p>
+                <h2>${formStep === 'tracking' ? 'Scan Tracking' : 'New Pickup'}</h2>
             </div>
             <button id="reset-form" class="ghost icon-only" type="button" title="Clear form">
               <i data-lucide="list-restart"></i>
             </button>
           </div>
-            ${
-              editingSubmissionId
-                ? `<div class="edit-upload-banner">
-                    <div>
-                      <strong>Editing pending upload</strong>
-                      <span>Press Upload to save these changes before admin marks it exported.</span>
-                    </div>
-                    <button id="cancel-upload-edit" class="secondary" type="button">Cancel Edit</button>
-                  </div>`
-                : ''
-            }
             ${formStep === 'tracking' ? trackingStepTemplate(current) : detailsStepTemplate(current)}
           </form>
 
@@ -509,6 +499,95 @@ function uploadPopupTemplate() {
         </div>
       </div>
     </div>
+  `;
+}
+
+function submissionModalTemplate() {
+  if (!activeSubmissionModal) return '';
+  const { submission, rows: modalRows, editable } = activeSubmissionModal;
+  const date = submission.createdAt ? new Date(submission.createdAt).toLocaleString() : 'Uploaded';
+  const fields = ['TrackingNumber', ...DETAIL_FIELDS];
+  return `
+    <div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="submission-modal-title">
+      <div class="submission-modal">
+        <div class="modal-heading">
+          <div>
+            <p class="form-kicker">${editable ? 'Pending upload' : 'Exported upload'}</p>
+            <h2 id="submission-modal-title">${editable ? 'Edit Uploaded Rows' : 'View Uploaded Rows'}</h2>
+            <span>${escapeHtml(date)} · ${modalRows.length} rows</span>
+          </div>
+          <button id="close-submission-modal" class="secondary icon-only" type="button" title="Close">
+            <i data-lucide="arrow-left"></i>
+          </button>
+        </div>
+        <form id="submission-modal-form" class="submission-modal-form">
+          <div class="modal-row-list">
+            ${
+              modalRows.length
+                ? modalRows
+                    .map(
+                      (row, index) => `
+                        <section class="modal-row-card">
+                          <div class="modal-row-title">
+                            <strong>${escapeHtml(row.TrackingNumber || `Row ${index + 1}`)}</strong>
+                            ${
+                              editable
+                                ? `<button class="danger icon-only" type="button" data-modal-delete-row="${index}" title="Delete row">
+                                    <i data-lucide="trash-2"></i>
+                                  </button>`
+                                : ''
+                            }
+                          </div>
+                          <div class="modal-field-grid">
+                            ${fields.map((header) => submissionModalFieldTemplate(row, index, header, editable)).join('')}
+                          </div>
+                        </section>
+                      `
+                    )
+                    .join('')
+                : '<p class="empty">No rows in this upload.</p>'
+            }
+          </div>
+          <div class="modal-actions">
+            <button id="close-submission-modal-secondary" class="secondary" type="button">Close</button>
+            ${
+              editable
+                ? `<button class="primary" type="submit">
+                    <i data-lucide="save"></i>
+                    <span>Save Changes</span>
+                  </button>`
+                : ''
+            }
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function submissionModalFieldTemplate(row, index, header, editable) {
+  const meta = FIELD_META[header] || { label: header, type: 'text', icon: 'package' };
+  const value = row?.[header] ?? '';
+  const common = `
+    data-modal-field="${header}"
+    data-modal-row="${index}"
+    name="${index}-${header}"
+    ${meta.min !== undefined ? `min="${meta.min}"` : ''}
+    ${editable ? 'required' : 'readonly'}
+  `;
+  if (header === 'ReceiverAddress') {
+    return `
+      <label class="modal-field modal-field-wide">
+        <span>${meta.label}</span>
+        <textarea ${common} rows="2">${escapeHtml(value)}</textarea>
+      </label>
+    `;
+  }
+  return `
+    <label class="modal-field">
+      <span>${meta.label}</span>
+      <input ${common} type="${meta.type || 'text'}" value="${escapeHtml(value)}" />
+    </label>
   `;
 }
 
@@ -1076,22 +1155,9 @@ function bindEvents() {
   document.querySelector('#reset-form').addEventListener('click', () => {
     stopScanner();
     editingId = null;
-    editingSubmissionId = '';
     duplicateWarning = '';
     formStep = 'tracking';
     draftRecord = emptyRecord();
-    render();
-  });
-
-  document.querySelector('#cancel-upload-edit')?.addEventListener('click', async () => {
-    editingSubmissionId = '';
-    editingId = null;
-    duplicateWarning = '';
-    rows = await loadUserDraftRows(currentUser.username);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
-    formStep = 'tracking';
-    draftRecord = emptyRecord();
-    appMessage = 'Pending upload edit cancelled.';
     render();
   });
 
@@ -1111,7 +1177,6 @@ function bindEvents() {
   document.querySelector('#clear-entry-btn')?.addEventListener('click', async () => {
     await clearUserDraftRows();
     editingId = null;
-    editingSubmissionId = '';
     duplicateWarning = '';
     forcedTrackingNumbers = new Set();
     formStep = 'tracking';
@@ -1142,12 +1207,14 @@ function bindEvents() {
   });
 
   document.querySelectorAll('[data-edit-submission]').forEach((button) => {
-    button.addEventListener('click', () => loadSubmissionIntoEditor(button.dataset.editSubmission, true));
+    button.addEventListener('click', () => openSubmissionModal(button.dataset.editSubmission, true));
   });
 
   document.querySelectorAll('[data-view-submission]').forEach((button) => {
-    button.addEventListener('click', () => loadSubmissionIntoEditor(button.dataset.viewSubmission, false));
+    button.addEventListener('click', () => openSubmissionModal(button.dataset.viewSubmission, false));
   });
+
+  bindSubmissionModalEvents();
 }
 
 function bindPieceStepper() {
@@ -1239,7 +1306,6 @@ async function findDuplicateTracking(trackingNumber) {
 
   const submissions = await loadAllSubmissions();
   for (const submission of submissions) {
-    if (editingSubmissionId && submission.id === editingSubmissionId) continue;
     const match = (submission.rows || []).find((row) => trackingNumberKey(row.TrackingNumber) === trackingKey);
     if (match) return { source: 'submission', user: submission.user, submission, row: match };
   }
@@ -1258,7 +1324,7 @@ async function loadAllSubmissions() {
   }
 }
 
-async function loadSubmissionIntoEditor(id, editable) {
+function openSubmissionModal(id, editable) {
   const submission = userSubmissions.find((item) => item.id === id);
   if (!submission) return;
   if (editable && submission.status === 'exported') {
@@ -1266,15 +1332,84 @@ async function loadSubmissionIntoEditor(id, editable) {
     render();
     return;
   }
-  rows = Array.isArray(submission.rows) ? submission.rows.map(normalizeRow) : [];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
-  editingSubmissionId = editable ? id : '';
-  editingId = null;
-  duplicateWarning = '';
-  formStep = 'tracking';
-  draftRecord = emptyRecord();
-  appMessage = editable ? 'Pending upload loaded. Edit rows and press Upload to save.' : 'Exported upload loaded for viewing.';
+  activeSubmissionModal = {
+    editable: editable && submission.status !== 'exported',
+    submission,
+    rows: Array.isArray(submission.rows) ? submission.rows.map(normalizeRow) : [],
+  };
+  appMessage = '';
   render();
+}
+
+function closeSubmissionModal() {
+  activeSubmissionModal = null;
+  render();
+}
+
+function bindSubmissionModalEvents() {
+  document.querySelector('#close-submission-modal')?.addEventListener('click', closeSubmissionModal);
+  document.querySelector('#close-submission-modal-secondary')?.addEventListener('click', closeSubmissionModal);
+
+  document.querySelectorAll('[data-modal-delete-row]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (!activeSubmissionModal?.editable) return;
+      const rowIndex = Number(button.dataset.modalDeleteRow);
+      activeSubmissionModal.rows = activeSubmissionModal.rows.filter((_, index) => index !== rowIndex);
+      render();
+    });
+  });
+
+  document.querySelector('#submission-modal-form')?.addEventListener('submit', saveSubmissionModal);
+}
+
+async function saveSubmissionModal(event) {
+  event.preventDefault();
+  if (!activeSubmissionModal?.editable) return;
+  const submissionId = activeSubmissionModal.submission.id;
+  const sourceSubmission = userSubmissions.find((item) => item.id === submissionId);
+  if (!sourceSubmission || sourceSubmission.status === 'exported') {
+    activeSubmissionModal = null;
+    appMessage = 'This upload is already exported and cannot be edited.';
+    render();
+    return;
+  }
+
+  const nextRows = activeSubmissionModal.rows.map((row, index) => {
+    const nextRow = { ...row };
+    document.querySelectorAll(`[data-modal-row="${index}"]`).forEach((field) => {
+      const header = field.dataset.modalField;
+      nextRow[header] = numericFields.has(header) ? Number(field.value || 0) : field.value.trim();
+    });
+    return normalizeRow(nextRow);
+  });
+
+  const invalid = nextRows.find((row) => ['TrackingNumber', ...DETAIL_FIELDS].some((header) => String(row[header] ?? '').trim() === ''));
+  if (invalid) {
+    appMessage = 'All fields are required before saving the upload.';
+    render();
+    return;
+  }
+
+  const exportRows = nextRows.map((row) => {
+    const normalized = normalizeRow(row);
+    return Object.fromEntries(HEADERS.map((header) => [header, normalized[header] ?? '']));
+  });
+
+  try {
+    await update(ref(firebaseDb, `submissions/${submissionId}`), {
+      rows: exportRows,
+      count: exportRows.length,
+      status: 'pending',
+      updatedAt: Date.now(),
+    });
+    activeSubmissionModal = null;
+    appMessage = 'Pending upload updated.';
+    await loadUserSubmissions();
+    render();
+  } catch {
+    appMessage = 'Could not update pending upload.';
+    render();
+  }
 }
 
 function bindCityPicker() {
@@ -1534,32 +1669,14 @@ async function uploadRows() {
       return Object.fromEntries(HEADERS.map((header) => [header, normalized[header] ?? '']));
     });
 
-    if (editingSubmissionId) {
-      const submission = userSubmissions.find((item) => item.id === editingSubmissionId);
-      if (!submission || submission.status === 'exported') {
-        editingSubmissionId = '';
-        appMessage = 'This upload is already exported and cannot be edited.';
-        render();
-        return;
-      }
-      await update(ref(firebaseDb, `submissions/${editingSubmissionId}`), {
-        rows: uploadRows,
-        count: uploadRows.length,
-        status: 'pending',
-        updatedAt: Date.now(),
-      });
-      uploadPopup = { count: uploadRows.length, updated: true };
-    } else {
-      await push(ref(firebaseDb, 'submissions'), {
-        user: currentUser.username,
-        rows: uploadRows,
-        count: uploadRows.length,
-        status: 'pending',
-        createdAt: Date.now(),
-      });
-      uploadPopup = { count: uploadRows.length };
-    }
-    editingSubmissionId = '';
+    await push(ref(firebaseDb, 'submissions'), {
+      user: currentUser.username,
+      rows: uploadRows,
+      count: uploadRows.length,
+      status: 'pending',
+      createdAt: Date.now(),
+    });
+    uploadPopup = { count: uploadRows.length };
     forcedTrackingNumbers = new Set();
     render();
   } catch {
@@ -1778,7 +1895,6 @@ async function importWorkbook(event) {
     return normalized;
   });
   editingId = null;
-  editingSubmissionId = '';
   duplicateWarning = '';
   saveRows();
   render();
