@@ -850,6 +850,42 @@ td {
   padding: 14px 16px;
 }
 
+.duplicate-warning,
+.edit-upload-banner {
+  align-items: center;
+  background: #fff8f6;
+  border: 1px solid rgba(184, 14, 48, 0.22);
+  border-radius: 22px;
+  color: var(--maroon-deep);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  line-height: 1.35;
+  padding: 14px;
+}
+
+.duplicate-warning strong,
+.edit-upload-banner strong {
+  display: block;
+  font-weight: 950;
+}
+
+.duplicate-warning span,
+.edit-upload-banner span {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  margin-top: 3px;
+}
+
+.duplicate-warning button,
+.edit-upload-banner button {
+  flex: 0 0 auto;
+  min-height: 48px;
+  padding: 0 16px;
+}
+
 .auth-panel {
   margin: 0 auto;
   max-width: 680px;
@@ -945,6 +981,25 @@ td {
   font-size: 12px;
   font-weight: 800;
   margin-top: 4px;
+}
+
+.tracking-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.tracking-preview span {
+  background: #fff8f6;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--maroon);
+  display: inline-flex;
+  font-size: 11px;
+  line-height: 1;
+  margin: 0;
+  padding: 7px 10px;
 }
 
 .user-history-panel {
@@ -1159,6 +1214,12 @@ td {
 
   .mini-row,
   .submission-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .duplicate-warning,
+  .edit-upload-banner {
     align-items: stretch;
     flex-direction: column;
   }

@@ -114,6 +114,9 @@ let adminSubmissions = [];
 let userSubmissions = [];
 let appMessage = '';
 let uploadPopup = null;
+let editingSubmissionId = '';
+let duplicateWarning = '';
+let forcedTrackingNumbers = new Set();
 
 initFirebase();
 
@@ -250,6 +253,10 @@ function saveSession(user) {
 
 function clearSession() {
   currentUser = null;
+  editingSubmissionId = '';
+  editingId = null;
+  duplicateWarning = '';
+  forcedTrackingNumbers = new Set();
   localStorage.removeItem(SESSION_KEY);
 }
 
@@ -272,7 +279,7 @@ function normalizeRow(row) {
 
 function saveRows() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
-  if (currentUser?.role === 'user' && firebaseDb) {
+  if (currentUser?.role === 'user' && firebaseDb && !editingSubmissionId) {
     set(ref(firebaseDb, `drafts/${accountKey(currentUser.username)}`), {
       rows: rows.map((row) => normalizeRow(row)),
       updatedAt: Date.now(),
@@ -399,15 +406,26 @@ async function render() {
 
         <div class="entry-layout">
           <form id="entry-form" class="entry-form" autocomplete="off">
-            <div class="form-title">
-              <div>
-                <p class="form-kicker">${editingId ? 'Update row' : 'Fast entry'}</p>
-                <h2>${formStep === 'tracking' ? 'Scan Tracking' : 'New Pickup'}</h2>
-              </div>
-              <button id="reset-form" class="ghost icon-only" type="button" title="Clear form">
-                <i data-lucide="list-restart"></i>
-              </button>
+          <div class="form-title">
+            <div>
+                <p class="form-kicker">${editingSubmissionId ? 'Editing upload' : editingId ? 'Update row' : 'Fast entry'}</p>
+                <h2>${editingSubmissionId ? 'Pending Upload' : formStep === 'tracking' ? 'Scan Tracking' : 'New Pickup'}</h2>
             </div>
+            <button id="reset-form" class="ghost icon-only" type="button" title="Clear form">
+              <i data-lucide="list-restart"></i>
+            </button>
+          </div>
+            ${
+              editingSubmissionId
+                ? `<div class="edit-upload-banner">
+                    <div>
+                      <strong>Editing pending upload</strong>
+                      <span>Press Upload to save these changes before admin marks it exported.</span>
+                    </div>
+                    <button id="cancel-upload-edit" class="secondary" type="button">Cancel Edit</button>
+                  </div>`
+                : ''
+            }
             ${formStep === 'tracking' ? trackingStepTemplate(current) : detailsStepTemplate(current)}
           </form>
 
@@ -478,9 +496,9 @@ function uploadPopupTemplate() {
           <i data-lucide="shield-check"></i>
         </div>
         <div>
-          <p class="form-kicker">Upload Complete</p>
-          <h2 id="upload-success-title">Successfully Uploaded</h2>
-          <p>${escapeHtml(uploadPopup.count)} rows uploaded to the admin notification panel.</p>
+          <p class="form-kicker">${uploadPopup.updated ? 'Update Complete' : 'Upload Complete'}</p>
+          <h2 id="upload-success-title">${uploadPopup.updated ? 'Pending Upload Updated' : 'Successfully Uploaded'}</h2>
+          <p>${escapeHtml(uploadPopup.count)} rows ${uploadPopup.updated ? 'saved in your pending upload' : 'uploaded to the admin notification panel'}.</p>
         </div>
         <div class="modal-actions">
           <button id="keep-entry-btn" class="secondary" type="button">Keep Entries</button>
@@ -807,6 +825,20 @@ function trackingStepTemplate(current) {
         current.TrackingNumber
       )}" placeholder="Scan or type tracking number" required />
     </label>
+    ${
+      duplicateWarning
+        ? `<div class="duplicate-warning">
+            <div>
+              <strong>Duplicate tracking number blocked.</strong>
+              <span>${escapeHtml(duplicateWarning)}</span>
+            </div>
+            <button id="force-tracking-btn" class="secondary" type="button">
+              <i data-lucide="key-round"></i>
+              <span>Force Use</span>
+            </button>
+          </div>`
+        : ''
+    }
     <div class="form-actions wizard-actions">
       <button id="next-step" class="primary" type="button">
         <i data-lucide="chevron-right"></i>
@@ -922,12 +954,35 @@ function submissionTemplate(item) {
 
 function userSubmissionTemplate(item) {
   const date = item.createdAt ? new Date(item.createdAt).toLocaleString() : 'Uploaded';
+  const rowsPreview = Array.isArray(item.rows) ? item.rows.slice(0, 3) : [];
+  const canEdit = item.status !== 'exported';
   return `
     <div class="submission-card compact-submission">
       <div>
         <p class="form-kicker">${escapeHtml(item.status || 'pending')}</p>
         <h3>${item.count || item.rows?.length || 0} rows</h3>
         <span>${escapeHtml(date)}</span>
+        ${
+          rowsPreview.length
+            ? `<div class="tracking-preview">
+                ${rowsPreview.map((row) => `<span>${escapeHtml(row.TrackingNumber || '-')}</span>`).join('')}
+                ${(item.rows?.length || 0) > rowsPreview.length ? `<span>+${(item.rows?.length || 0) - rowsPreview.length} more</span>` : ''}
+              </div>`
+            : ''
+        }
+      </div>
+      <div class="submission-actions">
+        ${
+          canEdit
+            ? `<button class="secondary" type="button" data-edit-submission="${escapeHtml(item.id)}">
+                <i data-lucide="save"></i>
+                <span>View / Edit</span>
+              </button>`
+            : `<button class="secondary" type="button" data-view-submission="${escapeHtml(item.id)}">
+                <i data-lucide="download"></i>
+                <span>View Rows</span>
+              </button>`
+        }
       </div>
     </div>
   `;
@@ -936,7 +991,7 @@ function userSubmissionTemplate(item) {
 function bindEvents() {
   const form = document.querySelector('#entry-form');
 
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (formStep !== 'details') return;
     const data = Object.fromEntries(new FormData(form).entries());
@@ -947,6 +1002,11 @@ function bindEvents() {
     }
     for (const field of numericFields) data[field] = data[field] === '' ? '' : Number(data[field]);
     Object.assign(data, excelOnlyDefaults(), { TrackingNumber: draftRecord.TrackingNumber });
+    if (!(await ensureTrackingCanBeUsed(data.TrackingNumber, { allowForced: true }))) {
+      formStep = 'tracking';
+      render();
+      return;
+    }
 
     if (editingId) {
       rows = rows.map((row) => (row.id === editingId ? normalizeRow({ ...row, ...data }) : row));
@@ -956,21 +1016,17 @@ function bindEvents() {
     editingId = null;
     formStep = 'tracking';
     draftRecord = emptyRecord();
+    duplicateWarning = '';
     saveRows();
     render();
   });
 
-  document.querySelector('#next-step')?.addEventListener('click', () => {
-    const trackingNumber = document.querySelector('#TrackingNumber').value.trim();
-    if (!trackingNumber) {
-      document.querySelector('#TrackingNumber').focus();
-      setScannerStatus('Tracking number is required.');
-      return;
-    }
-    draftRecord = normalizeRow({ ...draftRecord, TrackingNumber: trackingNumber });
-    formStep = 'details';
-    render();
-    document.querySelector('#ReceiverName')?.focus();
+  document.querySelector('#next-step')?.addEventListener('click', () => proceedToDetails(false));
+  document.querySelector('#force-tracking-btn')?.addEventListener('click', () => proceedToDetails(true));
+
+  document.querySelector('#TrackingNumber')?.addEventListener('input', () => {
+    duplicateWarning = '';
+    document.querySelector('.duplicate-warning')?.remove();
   });
 
   document.querySelector('#back-step')?.addEventListener('click', () => {
@@ -1021,8 +1077,22 @@ function bindEvents() {
   document.querySelector('#reset-form').addEventListener('click', () => {
     stopScanner();
     editingId = null;
+    editingSubmissionId = '';
+    duplicateWarning = '';
     formStep = 'tracking';
     draftRecord = emptyRecord();
+    render();
+  });
+
+  document.querySelector('#cancel-upload-edit')?.addEventListener('click', async () => {
+    editingSubmissionId = '';
+    editingId = null;
+    duplicateWarning = '';
+    rows = await loadUserDraftRows(currentUser.username);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+    formStep = 'tracking';
+    draftRecord = emptyRecord();
+    appMessage = 'Pending upload edit cancelled.';
     render();
   });
 
@@ -1042,6 +1112,9 @@ function bindEvents() {
   document.querySelector('#clear-entry-btn')?.addEventListener('click', async () => {
     await clearUserDraftRows();
     editingId = null;
+    editingSubmissionId = '';
+    duplicateWarning = '';
+    forcedTrackingNumbers = new Set();
     formStep = 'tracking';
     draftRecord = emptyRecord();
     uploadPopup = null;
@@ -1054,6 +1127,7 @@ function bindEvents() {
       editingId = button.dataset.edit;
       draftRecord = normalizeRow(rows.find((row) => row.id === editingId) || emptyRecord());
       formStep = 'tracking';
+      duplicateWarning = '';
       render();
       document.querySelector('#TrackingNumber').focus();
     });
@@ -1067,6 +1141,14 @@ function bindEvents() {
       render();
     });
   });
+
+  document.querySelectorAll('[data-edit-submission]').forEach((button) => {
+    button.addEventListener('click', () => loadSubmissionIntoEditor(button.dataset.editSubmission, true));
+  });
+
+  document.querySelectorAll('[data-view-submission]').forEach((button) => {
+    button.addEventListener('click', () => loadSubmissionIntoEditor(button.dataset.viewSubmission, false));
+  });
 }
 
 function bindPieceStepper() {
@@ -1079,6 +1161,118 @@ function bindPieceStepper() {
       input.value = Math.max(1, current + step);
     });
   });
+}
+
+async function proceedToDetails(forceUse = false) {
+  const input = document.querySelector('#TrackingNumber');
+  const trackingNumber = input?.value.trim() || '';
+  if (!trackingNumber) {
+    input?.focus();
+    setScannerStatus('Tracking number is required.');
+    return;
+  }
+  if (!(await ensureTrackingCanBeUsed(trackingNumber, { forceUse }))) {
+    input?.focus();
+    return;
+  }
+  draftRecord = normalizeRow({ ...draftRecord, TrackingNumber: trackingNumber });
+  duplicateWarning = '';
+  formStep = 'details';
+  render();
+  document.querySelector('#ReceiverName')?.focus();
+}
+
+async function ensureTrackingCanBeUsed(trackingNumber, { forceUse = false, allowForced = false } = {}) {
+  const trackingKey = trackingNumberKey(trackingNumber);
+  if (!trackingKey) return true;
+  if (forceUse) {
+    forcedTrackingNumbers.add(trackingKey);
+    return true;
+  }
+  if (allowForced && forcedTrackingNumbers.has(trackingKey)) return true;
+
+  const duplicate = await findDuplicateTracking(trackingNumber);
+  if (!duplicate) return true;
+
+  duplicateWarning =
+    duplicate.source === 'current'
+      ? `${trackingNumber} already exists in your current entry list.`
+      : `${trackingNumber} was already uploaded by ${duplicate.user || 'a user'}.`;
+  return false;
+}
+
+async function findDuplicateTracking(trackingNumber) {
+  const trackingKey = trackingNumberKey(trackingNumber);
+  if (!trackingKey) return null;
+
+  const currentDuplicate = rows.find((row) => {
+    if (editingId && row.id === editingId) return false;
+    return trackingNumberKey(row.TrackingNumber) === trackingKey;
+  });
+  if (currentDuplicate) return { source: 'current', row: currentDuplicate };
+
+  const submissions = await loadAllSubmissions();
+  for (const submission of submissions) {
+    if (editingSubmissionId && submission.id === editingSubmissionId) continue;
+    const match = (submission.rows || []).find((row) => trackingNumberKey(row.TrackingNumber) === trackingKey);
+    if (match) return { source: 'submission', user: submission.user, submission, row: match };
+  }
+  return null;
+}
+
+async function findRowsDuplicateForUpload(uploadRows) {
+  const seen = new Map();
+  for (const row of uploadRows) {
+    const key = trackingNumberKey(row.TrackingNumber);
+    if (!key || forcedTrackingNumbers.has(key)) continue;
+    if (seen.has(key)) return { trackingNumber: row.TrackingNumber, source: 'current' };
+    seen.set(key, row);
+  }
+
+  const submissions = await loadAllSubmissions();
+  for (const row of uploadRows) {
+    const key = trackingNumberKey(row.TrackingNumber);
+    if (!key || forcedTrackingNumbers.has(key)) continue;
+    const duplicate = submissions.find((submission) => {
+      if (editingSubmissionId && submission.id === editingSubmissionId) return false;
+      return (submission.rows || []).some((submissionRow) => trackingNumberKey(submissionRow.TrackingNumber) === key);
+    });
+    if (duplicate) {
+      return { trackingNumber: row.TrackingNumber, source: 'submission', user: duplicate.user };
+    }
+  }
+  return null;
+}
+
+async function loadAllSubmissions() {
+  if (!firebaseDb) return [];
+  try {
+    const submissionsSnap = await get(ref(firebaseDb, 'submissions'));
+    return submissionsSnap.exists()
+      ? Object.entries(submissionsSnap.val()).map(([id, value]) => ({ id, ...value }))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadSubmissionIntoEditor(id, editable) {
+  const submission = userSubmissions.find((item) => item.id === id);
+  if (!submission) return;
+  if (editable && submission.status === 'exported') {
+    appMessage = 'Exported uploads cannot be edited.';
+    render();
+    return;
+  }
+  rows = Array.isArray(submission.rows) ? submission.rows.map(normalizeRow) : [];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+  editingSubmissionId = editable ? id : '';
+  editingId = null;
+  duplicateWarning = '';
+  formStep = 'tracking';
+  draftRecord = emptyRecord();
+  appMessage = editable ? 'Pending upload loaded. Edit rows and press Upload to save.' : 'Exported upload loaded for viewing.';
+  render();
 }
 
 function bindCityPicker() {
@@ -1334,14 +1528,44 @@ async function uploadRows() {
       const normalized = normalizeRow(row);
       return Object.fromEntries(HEADERS.map((header) => [header, normalized[header] ?? '']));
     });
-    await push(ref(firebaseDb, 'submissions'), {
-      user: currentUser.username,
-      rows: uploadRows,
-      count: uploadRows.length,
-      status: 'pending',
-      createdAt: Date.now(),
-    });
-    uploadPopup = { count: uploadRows.length };
+
+    const duplicate = await findRowsDuplicateForUpload(uploadRows);
+    if (duplicate) {
+      appMessage =
+        duplicate.source === 'current'
+          ? `Duplicate tracking number ${duplicate.trackingNumber} is already in this upload. Use Force Use from the tracking step if needed.`
+          : `Duplicate tracking number ${duplicate.trackingNumber} was already uploaded by ${duplicate.user || 'a user'}. Use Force Use from the tracking step if needed.`;
+      render();
+      return;
+    }
+
+    if (editingSubmissionId) {
+      const submission = userSubmissions.find((item) => item.id === editingSubmissionId);
+      if (!submission || submission.status === 'exported') {
+        editingSubmissionId = '';
+        appMessage = 'This upload is already exported and cannot be edited.';
+        render();
+        return;
+      }
+      await update(ref(firebaseDb, `submissions/${editingSubmissionId}`), {
+        rows: uploadRows,
+        count: uploadRows.length,
+        status: 'pending',
+        updatedAt: Date.now(),
+      });
+      uploadPopup = { count: uploadRows.length, updated: true };
+    } else {
+      await push(ref(firebaseDb, 'submissions'), {
+        user: currentUser.username,
+        rows: uploadRows,
+        count: uploadRows.length,
+        status: 'pending',
+        createdAt: Date.now(),
+      });
+      uploadPopup = { count: uploadRows.length };
+    }
+    editingSubmissionId = '';
+    forcedTrackingNumbers = new Set();
     render();
   } catch {
     appMessage = 'Upload failed. Check Firebase connection/rules.';
@@ -1559,6 +1783,8 @@ async function importWorkbook(event) {
     return normalized;
   });
   editingId = null;
+  editingSubmissionId = '';
+  duplicateWarning = '';
   saveRows();
   render();
 }
@@ -1569,6 +1795,10 @@ function formatNumber(value) {
 
 function normalizeSearch(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function trackingNumberKey(value) {
+  return normalizeSearch(value).replace(/[^a-z0-9]/g, '');
 }
 
 function accountKey(value) {
